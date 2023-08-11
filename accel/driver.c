@@ -1,5 +1,7 @@
 #include "driver.h"
 
+#include <ntintsafe.h>
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (INIT, DriverEntry)
 #pragma alloc_text (PAGE, WdfDeviceAddCallback)
@@ -155,8 +157,11 @@ VOID WdfDispatchPassthrough(
 }
 
 /*
-* IO packet callback function that will be executed when an IO packet is sent through
-* the mouse driver stack.
+* In response to an IRP_MJ_READ request, Mouclass will transfer 0 or more MOUSE_INPUT_DATA
+* structures from the internal data queue to the Win32 subsystem buffer. From here, we can 
+* filter that data and then return it back to the system buffer.
+* 
+* https://learn.microsoft.com/en-us/previous-versions/ff542215(v=vs.85)
 */
 VOID WdfMouseFilterCallback(
     IN PDEVICE_OBJECT DeviceObject,
@@ -167,12 +172,40 @@ VOID WdfMouseFilterCallback(
 {
     PDEVICE_EXTENSION device_extension;
     WDFDEVICE device_handle;
+    INT packet_count = 0;
 
     /* Get our device's handle and device extension structure*/
     device_handle = WdfWdmDeviceGetWdfDeviceHandle( DeviceObject );
     device_extension = FilterGetData( device_handle );
 
-    DEBUG_LOG( "Mouse X: %lx, mouse Y: %lx", InputDataStart->LastX, InputDataStart->LastY );
+    packet_count = InputDataEnd - InputDataStart;
+
+    INT64 current_tick = KeQueryPerformanceCounter( NULL ).QuadPart;
+    INT64 tick_delta = current_tick - device_extension->PreviousTick;
+    INT64 average_tick_time = tick_delta / packet_count;
+
+    device_extension->PreviousTick = current_tick;
+
+    INT64 x_distance = InputDataEnd->LastX - InputDataStart->LastX;
+    INT64 y_distance = InputDataEnd->LastY - InputDataStart->LastY;
+
+    /* 
+    * need to link LIBCNTPR to use library math functions 
+    * Need to save registers using the 2 functions below whilst doing any floating point operations
+    * 
+    * https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/floating-point-support-for-64-bit-drivers
+    */
+    DOUBLE absolute_distance = sqrt( x_distance * x_distance + y_distance * y_distance );
+
+    DOUBLE speed = absolute_distance / ( average_tick_time * NUM_TICKS_PER_MS );
+
+    DEBUG_LOG( "Current speed: %f", speed );
+
+    /* Iterate through all packets */
+    //for ( PMOUSE_INPUT_DATA InputData = InputDataStart; InputData < InputDataEnd; InputData++ )
+    //{
+    //    DEBUG_LOG( "InputDataX Start: %lx, InputDataY End: %lx", InputData->LastX, InputData->LastY );
+    //}
 
     /* now that we are done processing the IO packet, pass the data to the class data queue */
     ( *( PSERVICE_CALLBACK_ROUTINE )device_extension->UpperConnectData.ClassService )(
@@ -260,11 +293,12 @@ VOID WdfInternalDeviceIoControl(
 
         /*
         * This IO request has not been implemented, however it would be implemented
-        * by clearing the connection parameters in the 
+        * by clearing the connection parameters in the CONNECT_DATA structure
+        * located in our devices DEVICE_EXTENSION structure
         * 
         * 
-        * devExt->UpperConnectData.ClassDeviceObject = NULL;
-        * devExt->UpperConnectData.ClassService = NULL;
+        * device_extension->UpperConnectData.ClassDeviceObject = NULL;
+        * device_extension->UpperConnectData.ClassService = NULL;
         * 
         */
         status = STATUS_NOT_IMPLEMENTED;
@@ -298,7 +332,7 @@ VOID WdfInternalDeviceIoControl(
 * This function will handle our external device IO requests that interface with outside 
 * applications i.e requests that do not come from inside the device stack
 */
-VOID WdfAccelDeviceMajorControl(
+VOID WdfExternalDeviceIoControl(
     _In_ WDFQUEUE Queue,
     _In_ WDFREQUEST Request,
     _In_ SIZE_T OutputBufferLength,
@@ -312,7 +346,7 @@ VOID WdfAccelDeviceMajorControl(
 
     PAGED_CODE();
 
-    DEBUG_LOG( "WdfAccelDeviceMajorControl called with control code: %lx", IoControlCode );
+    DEBUG_LOG( "WdfExternalDeviceIoControl called with control code: %lx", IoControlCode );
 
     /* Complete the request */
     WdfRequestCompleteWithInformation(
@@ -397,7 +431,7 @@ NTSTATUS WdfCreateControlDevice(
     );
 
     /* Assign our IO device control callback function */
-    io_queue_config.EvtIoDeviceControl = WdfAccelDeviceMajorControl;
+    io_queue_config.EvtIoDeviceControl = WdfExternalDeviceIoControl;
 
     /* Create our queue */
     status = WdfIoQueueCreate(

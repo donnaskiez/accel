@@ -10,13 +10,11 @@
 #define DEBUG_LOG(fmt, ...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0, "[+] " fmt "\n", ##__VA_ARGS__)
 #define DEBUG_ERROR(fmt, ...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0, "[-] " fmt "\n", ##__VA_ARGS__)
 
+#define NUM_TICKS_PER_MS 10000
+
 typedef struct _DEVICE_EXTENSION
-{                           
-    PVOID UpperContext;
-    PI8042_MOUSE_ISR UpperIsrHook;
-    IN PI8042_ISR_WRITE_PORT IsrWritePort;
-    IN PVOID CallContext;
-    IN PI8042_QUEUE_PACKET QueueMousePacket;
+{     
+    INT64 PreviousTick;
     CONNECT_DATA UpperConnectData;
 
 } DEVICE_EXTENSION, * PDEVICE_EXTENSION;
