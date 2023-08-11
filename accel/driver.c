@@ -23,6 +23,8 @@ NTSTATUS DriverEntry(
     WDF_DRIVER_CONFIG config;
     NTSTATUS status = STATUS_SUCCESS;
 
+    DEBUG_LOG( "DriverEntry called" );
+
     /* Initialise our drivers WDF_DRIVER_CONFIG structure */
     WDF_DRIVER_CONFIG_INIT(
         &config,
@@ -38,8 +40,8 @@ NTSTATUS DriverEntry(
         WDF_NO_HANDLE 
     );
 
-    if ( !NT_SUCCESS( status ) ) 
-        DEBUG_LOG( "WdfDriverCreate failed with status 0x%x", status );
+    if ( !NT_SUCCESS( status ) )
+        DEBUG_ERROR( "WdfDriverCreate failed with status 0x%x", status );
 
     return status;
 }
@@ -61,7 +63,7 @@ NTSTATUS WdfDeviceAddCallback(
     /* Ensure we are running at an IRQL that allows paging */
     PAGED_CODE();
 
-    DEBUG_LOG( "Adding mouse filter device" );
+    DEBUG_LOG( "WdfDeviceAddCallback called" );
 
     WDF_OBJECT_ATTRIBUTES device_attributes;
     NTSTATUS status = STATUS_SUCCESS;
@@ -82,7 +84,7 @@ NTSTATUS WdfDeviceAddCallback(
 
     if ( !NT_SUCCESS( status ) ) 
     {
-        DEBUG_LOG( "WdfDeviceCreate failed with status code 0x%x", status );
+        DEBUG_ERROR( "WdfDeviceCreate failed with status code 0x%x", status );
         return status;
     }
 
@@ -103,8 +105,17 @@ NTSTATUS WdfDeviceAddCallback(
         WDF_NO_HANDLE
     );
 
-    if ( !NT_SUCCESS( status ) ) 
-        DEBUG_LOG( "WdfIoQueueCreate failed 0x%x", status );
+    if ( !NT_SUCCESS( status ) )
+    {
+        DEBUG_ERROR( "WdfIoQueueCreate failed 0x%x", status );
+        return status;
+    }
+
+    /* Create our IO control device (seperate from the internal device IO control) */
+    status = status = WdfCreateControlDevice( Driver );
+
+    if ( !NT_SUCCESS( status ) )
+        DEBUG_ERROR( "WdfCreateControlDevice failed with status code 0x%lx", status );
 
     return status;
 }
@@ -120,7 +131,7 @@ VOID WdfDispatchPassthrough(
 )
 {
     WDF_REQUEST_SEND_OPTIONS options;
-    BOOLEAN return_value;
+    BOOLEAN request_status;
     NTSTATUS status = STATUS_SUCCESS;
 
     /* 
@@ -133,12 +144,12 @@ VOID WdfDispatchPassthrough(
     );
 
     /* Send the IO request down the stack to the target */
-    return_value = WdfRequestSend( Request, Target, &options );
+    request_status = WdfRequestSend( Request, Target, &options );
 
-    if ( return_value == FALSE ) 
+    if ( request_status == FALSE ) 
     {
         status = WdfRequestGetStatus( Request );
-        DEBUG_LOG( "WdfRequestSend failed: 0x%x", status );
+        DEBUG_ERROR( "WdfRequestSend failed: 0x%x", status );
         WdfRequestComplete( Request, status );
     }
 }
@@ -173,8 +184,7 @@ VOID WdfMouseFilterCallback(
 }
 
 /*
-* DeviceIOControl routine which will handle IO requests. Stock standard
-* for windows drivers of all kinds. 
+* DeviceIOControl routine which will handle the internal device stack IO requests.
 */
 VOID WdfInternalDeviceIoControl(
     IN WDFQUEUE Queue,
@@ -197,15 +207,12 @@ VOID WdfInternalDeviceIoControl(
     WDFDEVICE device_handle;
     size_t length;
 
-    /* Get a handle to our device */
-    device_handle = WdfIoQueueGetDevice( Queue );
-
     /* 
-    * Ensure we have a valid handle as passing an invalid handle to 
-    * WdfDeviceWdmGetDeviceObject will cause a bugcheck
+    * Get a handle to our device. No need to check for null here
+    * since if the handle is invalid WdfIoQueueGetDevice will issue
+    * a bug check anyway
     */
-    //if ( !device_handle )
-    //    return;
+    device_handle = WdfIoQueueGetDevice( Queue );
 
     /* Retrieve our devices DEVICE_EXTENSION structure */
     device_extension = FilterGetData( device_handle );
@@ -231,7 +238,7 @@ VOID WdfInternalDeviceIoControl(
 
         if ( !NT_SUCCESS( status ) ) 
         {
-            DEBUG_LOG( "WdfRequestRetrieveInputBuffer failed %x", status );
+            DEBUG_ERROR( "WdfRequestRetrieveInputBuffer failed %x", status );
             break;
         }
 
@@ -251,12 +258,15 @@ VOID WdfInternalDeviceIoControl(
 
     case IOCTL_INTERNAL_MOUSE_DISCONNECT:
 
-        //
-        // Clear the connection parameters in the device extension.
-        //
-        // devExt->UpperConnectData.ClassDeviceObject = NULL;
-        // devExt->UpperConnectData.ClassService = NULL;
-
+        /*
+        * This IO request has not been implemented, however it would be implemented
+        * by clearing the connection parameters in the 
+        * 
+        * 
+        * devExt->UpperConnectData.ClassDeviceObject = NULL;
+        * devExt->UpperConnectData.ClassService = NULL;
+        * 
+        */
         status = STATUS_NOT_IMPLEMENTED;
 
         break;
@@ -273,9 +283,149 @@ VOID WdfInternalDeviceIoControl(
     
     /* 
     * If we get here it means we are not interested in this request, hence pass 
-    * down the device stack and do no further processing 
+    * down the device stack and do no further processing. This device sits below the 
+    * mouclass device and above the mouhid device hence we only see IO requests
+    * that mouclass sends on to the devices beneath them in the stack. This is because
+    * IO requests start at the top of the stack with functional device objects and move
+    * there way down the stack towards physical device objects. Read below for more info.
+    * 
+    * https://www.osr.com/nt-insider/2020-issue1/a-generic-device-class-filter-using-wdf/
     */
     WdfDispatchPassthrough( Request, WdfDeviceGetIoTarget( device_handle ) );
+}
+
+/*
+* This function will handle our external device IO requests that interface with outside 
+* applications i.e requests that do not come from inside the device stack
+*/
+VOID WdfAccelDeviceMajorControl(
+    _In_ WDFQUEUE Queue,
+    _In_ WDFREQUEST Request,
+    _In_ SIZE_T OutputBufferLength,
+    _In_ SIZE_T InputBufferLength,
+    _In_ ULONG IoControlCode
+)
+{
+    UNREFERENCED_PARAMETER( Queue );
+    UNREFERENCED_PARAMETER( OutputBufferLength );
+    UNREFERENCED_PARAMETER( InputBufferLength );
+
+    PAGED_CODE();
+
+    DEBUG_LOG( "WdfAccelDeviceMajorControl called with control code: %lx", IoControlCode );
+
+    /* Complete the request */
+    WdfRequestCompleteWithInformation(
+        Request,
+        STATUS_SUCCESS,
+        NULL
+    );
+}
+
+/*
+* This routine creates a control device for our driver that allows us to communicate
+* with our device without having to send our IOCTL through the entire stack. An example
+* is from a user mode application sent directly to our device. 
+*/
+NTSTATUS WdfCreateControlDevice(
+    _In_ WDFDRIVER WdfDriver
+)
+{
+    PAGED_CODE();
+
+    PWDFDEVICE_INIT wdf_device_init = NULL;
+    WDFDEVICE control_device = NULL;
+    WDF_OBJECT_ATTRIBUTES control_device_attributes;
+    WDF_IO_QUEUE_CONFIG io_queue_config;
+    BOOLEAN create_status = FALSE;
+    NTSTATUS status = STATUS_SUCCESS;
+    WDFQUEUE queue;
+
+    /* Constants that will be used to allow us to identify our device */
+    DECLARE_CONST_UNICODE_STRING( device_control_name, DEVICE_CONTROL_NAME_STRING );
+    DECLARE_CONST_UNICODE_STRING( device_control_symbolic_link, DEVICE_CONTROL_SYMBOLIC_LINK );
+
+    DEBUG_LOG( "WdfCreateControlDevice called" );
+
+    /* Allocate a control device for our driver */
+    wdf_device_init = WdfControlDeviceInitAllocate(
+        WdfDriver,
+        &SDDL_DEVOBJ_SYS_ALL_ADM_RWX_WORLD_RW_RES_R
+    );
+
+    if ( !wdf_device_init )
+        goto error;
+
+    /* 
+    * Set our device exclusivity to false meaning we can have multiple handles 
+    * open to our device at once
+    */
+    WdfDeviceInitSetExclusive( wdf_device_init, FALSE );
+
+    /* assign our control device name */
+    status = WdfDeviceInitAssignName(
+        wdf_device_init,
+        &device_control_name
+    );
+
+    if ( !NT_SUCCESS( status ) )
+        goto error;
+
+    /* create our control device */
+    status = WdfDeviceCreate(
+        &wdf_device_init,
+        WDF_NO_OBJECT_ATTRIBUTES,
+        &control_device
+    );
+
+    if ( !NT_SUCCESS( status ) )
+        goto error;
+
+    /* create our control device symbolic link */
+    status = WdfDeviceCreateSymbolicLink(
+        control_device,
+        &device_control_symbolic_link
+    );
+
+    if ( !NT_SUCCESS( status ) )
+        goto error;
+
+    /* create our control device sequential queue (FIFO) */
+    WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(
+        &io_queue_config,
+        WdfIoQueueDispatchSequential
+    );
+
+    /* Assign our IO device control callback function */
+    io_queue_config.EvtIoDeviceControl = WdfAccelDeviceMajorControl;
+
+    /* Create our queue */
+    status = WdfIoQueueCreate(
+        control_device,
+        &io_queue_config,
+        WDF_NO_OBJECT_ATTRIBUTES,
+        &queue
+    );
+
+    if ( !NT_SUCCESS( status ) )
+        goto error;
+
+    /* notify the framework that we have finished initialising our device */
+    WdfControlFinishInitializing( control_device );
+
+    return STATUS_SUCCESS;
+
+error:
+
+    if ( wdf_device_init )
+        WdfDeviceInitFree( wdf_device_init );
+
+    if ( control_device )
+        WdfObjectDelete( control_device );
+
+    DEBUG_ERROR( "WdfCreateControlDevice failed with status code 0x%x", status );
+
+    return status;
 }
 
 #pragma warning(pop)

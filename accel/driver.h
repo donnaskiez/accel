@@ -21,15 +21,24 @@ typedef struct _DEVICE_EXTENSION
 
 } DEVICE_EXTENSION, * PDEVICE_EXTENSION;
 
-WDF_DECLARE_CONTEXT_TYPE_WITH_NAME( 
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(
     DEVICE_EXTENSION,
-    FilterGetData 
+    FilterGetData
 )
 
-DRIVER_INITIALIZE DriverEntry;
+#define DEVICE_CONTROL_NAME_STRING L"\\Device\\AccelDriver"
+#define DEVICE_CONTROL_SYMBOLIC_LINK L"\\DosDevices\\AccelDriver"
 
+UNICODE_STRING device_control_name;
+UNICODE_STRING device_control_symbolic_link;
+
+DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD WdfDeviceAddCallback;
 EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL WdfInternalDeviceIoControl;
+
+NTSTATUS WdfCreateControlDevice(
+    _In_ WDFDRIVER WdfDriver
+);
 
 #endif
 
