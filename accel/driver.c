@@ -188,13 +188,6 @@ VOID WdfMouseFilterCallback(
     LONG y_distance = InputDataEnd->LastY - InputDataStart->LastY;
     LONG total_distance = x_distance * x_distance + y_distance * y_distance;
 
-    /* 
-    * need to link LIBCNTPR to use library math functions 
-    * Need to save registers using the 2 functions below whilst doing any floating point operations
-    * 
-    * https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/floating-point-support-for-64-bit-drivers
-    */
-
     LONG absolute_distance = MySqrt( total_distance );
 
     LONG speed = absolute_distance / ( average_tick_time * NUM_TICKS_PER_MS );

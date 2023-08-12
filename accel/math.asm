@@ -6,7 +6,6 @@
 ; as we dont need that level of precision and we need to be as efficient as possible
 ;
 ; compiler will take care of saving the SSE state for us and restoring it source:
-; 
 ; https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/using-floating-point-or-mmx-in-a-wdm-driver
 ;
 
