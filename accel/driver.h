@@ -38,6 +38,8 @@ NTSTATUS WdfCreateControlDevice(
     _In_ WDFDRIVER WdfDriver
 );
 
+extern INT64 MySqrt( INT64 Number );
+
 #endif
 
 

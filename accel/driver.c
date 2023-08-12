@@ -1,7 +1,5 @@
 #include "driver.h"
 
-#include <ntintsafe.h>
-
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (INIT, DriverEntry)
 #pragma alloc_text (PAGE, WdfDeviceAddCallback)
@@ -186,8 +184,9 @@ VOID WdfMouseFilterCallback(
 
     device_extension->PreviousTick = current_tick;
 
-    INT64 x_distance = InputDataEnd->LastX - InputDataStart->LastX;
-    INT64 y_distance = InputDataEnd->LastY - InputDataStart->LastY;
+    LONG x_distance = InputDataEnd->LastX - InputDataStart->LastX;
+    LONG y_distance = InputDataEnd->LastY - InputDataStart->LastY;
+    LONG total_distance = x_distance * x_distance + y_distance * y_distance;
 
     /* 
     * need to link LIBCNTPR to use library math functions 
@@ -195,11 +194,17 @@ VOID WdfMouseFilterCallback(
     * 
     * https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/floating-point-support-for-64-bit-drivers
     */
-    DOUBLE absolute_distance = sqrt( x_distance * x_distance + y_distance * y_distance );
 
-    DOUBLE speed = absolute_distance / ( average_tick_time * NUM_TICKS_PER_MS );
+    LONG absolute_distance = MySqrt( total_distance );
 
-    DEBUG_LOG( "Current speed: %f", speed );
+    LONG speed = absolute_distance / ( average_tick_time * NUM_TICKS_PER_MS );
+
+    DEBUG_LOG( "Absolute distance: %lx, total distance: %lx, x distance: %lx, y distance: %lx",
+        absolute_distance, 
+        total_distance, 
+        x_distance, 
+        y_distance
+    );
 
     /* Iterate through all packets */
     //for ( PMOUSE_INPUT_DATA InputData = InputDataStart; InputData < InputDataEnd; InputData++ )
