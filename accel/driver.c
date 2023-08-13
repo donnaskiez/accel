@@ -170,40 +170,43 @@ VOID WdfMouseFilterCallback(
 {
     PDEVICE_EXTENSION device_extension;
     WDFDEVICE device_handle;
-    INT packet_count = 0;
 
     /* Get our device's handle and device extension structure*/
     device_handle = WdfWdmDeviceGetWdfDeviceHandle( DeviceObject );
     device_extension = FilterGetData( device_handle );
 
-    packet_count = InputDataEnd - InputDataStart;
+    /* 
+    * For some reason my mouse only sends 1 packet at a time despite what ive read online
+    * regarding that there is always more then 1 packet sent up the stack at a time, so
+    * we must try something different to get the speed of the mouse
+    */
 
     INT64 current_tick = KeQueryPerformanceCounter( NULL ).QuadPart;
-    INT64 tick_delta = current_tick - device_extension->PreviousTick;
-    INT64 average_tick_time = tick_delta / packet_count;
+    INT64 tick_delta = ( current_tick - device_extension->PreviousTick ) / 100;
+
+    if ( InputDataStart->Flags & MOUSE_MOVE_RELATIVE )
+    {
+        DEBUG_LOG( "Mouse move relative LOL! X: %ld, Y: %ld", InputDataStart->LastX, InputDataStart->LastY );
+    }
+    else
+    {
+        DEBUG_LOG( "Mouse move abolsute fuck sakes" );
+    }
+
+    /* this is really not ideal.... */
+    //if ( device_extension->PreviousX == UNINITIALISED_COORDINATE && 
+    //    device_extension->PreviousY == UNINITIALISED_COORDINATE )
+    //{
+    //    device_extension->PreviousX = InputDataStart->LastX;
+    //    device_extension->PreviousY = InputDataStart->LastY;
+    //    goto end;
+    //}
+
+
+
+end:
 
     device_extension->PreviousTick = current_tick;
-
-    LONG x_distance = InputDataEnd->LastX - InputDataStart->LastX;
-    LONG y_distance = InputDataEnd->LastY - InputDataStart->LastY;
-    LONG total_distance = x_distance * x_distance + y_distance * y_distance;
-
-    LONG absolute_distance = MySqrt( total_distance );
-
-    LONG speed = absolute_distance / ( average_tick_time * NUM_TICKS_PER_MS );
-
-    DEBUG_LOG( "Absolute distance: %lx, total distance: %lx, x distance: %lx, y distance: %lx",
-        absolute_distance, 
-        total_distance, 
-        x_distance, 
-        y_distance
-    );
-
-    /* Iterate through all packets */
-    //for ( PMOUSE_INPUT_DATA InputData = InputDataStart; InputData < InputDataEnd; InputData++ )
-    //{
-    //    DEBUG_LOG( "InputDataX Start: %lx, InputDataY End: %lx", InputData->LastX, InputData->LastY );
-    //}
 
     /* now that we are done processing the IO packet, pass the data to the class data queue */
     ( *( PSERVICE_CALLBACK_ROUTINE )device_extension->UpperConnectData.ClassService )(
@@ -275,6 +278,10 @@ VOID WdfInternalDeviceIoControl(
 
         /* store our connect data in our device extension structure */
         device_extension->UpperConnectData = *connect_data;
+
+        /* Initialise our previous X and Y values */
+        device_extension->PreviousX = UNINITIALISED_COORDINATE;
+        device_extension->PreviousY = UNINITIALISED_COORDINATE;
 
         /* 
         * The CONNECT_DATA structure is used to store information that the Kbdclass and
