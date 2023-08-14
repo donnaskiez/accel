@@ -230,10 +230,17 @@ VOID WdfMouseFilterCallback(
 {
     PDEVICE_EXTENSION device_extension;
     WDFDEVICE device_handle;
+    INT multiplier = 0;
+    INT enabled = 0;
 
     /* Get our device's handle and device extension structure*/
     device_handle = WdfWdmDeviceGetWdfDeviceHandle( DeviceObject );
     device_extension = FilterGetData( device_handle );
+
+    InterlockedExchange( &enabled, device_extension->Enabled );
+
+    if ( enabled == ACCEL_DISABLED )
+        goto end;
 
     /* 
     * Despite what is stated in the (probably) outdated WDF documentation, mouse packets
@@ -246,14 +253,28 @@ VOID WdfMouseFilterCallback(
     INT64 current_tick = KeQueryPerformanceCounter( NULL ).QuadPart;
     INT64 tick_delta = ( current_tick - device_extension->PreviousTick ) / 100;
 
-    DEBUG_LOG( "Flags: %lx -- X: %lx, Y: %lx", InputDataStart->Flags, InputDataStart->LastX, InputDataStart->LastY);
-
     /* 
     * No need to check the flags to ensure its a relative movement since its an expensive 
     * operation and we can just assume that the packet is a relative packet. (lol)
     */
 
+    InterlockedExchange( &multiplier, device_extension->AccelMultiplier );
+
+    if ( InputDataStart->LastX > 2 )
+        InputDataStart->LastX = InputDataStart->LastX * multiplier;
+
+    if ( InputDataStart->LastX < -2 )
+        InputDataStart->LastX = InputDataStart->LastX * multiplier;
+
+    if ( InputDataStart->LastY > 2 )
+        InputDataStart->LastY = InputDataStart->LastY * multiplier;
+
+    if ( InputDataStart->LastY < -2 )
+        InputDataStart->LastY = InputDataStart->LastY * multiplier;
+
     device_extension->PreviousTick = current_tick;
+
+end:
 
     /* now that we are done processing the IO packet, pass the data to the class data queue */
     ( *( PSERVICE_CALLBACK_ROUTINE )device_extension->UpperConnectData.ClassService )(
@@ -324,6 +345,7 @@ VOID WdfInternalDeviceIoControl(
 
         /* store our connect data in our device extension structure */
         device_extension->UpperConnectData = *connect_data;
+        device_extension->AccelMultiplier = 2;
 
         /* 
         * The CONNECT_DATA structure is used to store information that the Kbdclass and
@@ -393,12 +415,56 @@ VOID WdfExternalDeviceIoControl(
 
     PAGED_CODE();
 
+    NTSTATUS status;
+    PDEVICE_EXTENSION device_extension;
+    WDFOBJECT device_object;
+    PVOID buffer;
+    SIZE_T buffer_size;
+
     DEBUG_LOG( "WdfExternalDeviceIoControl called with control code: %lx", IoControlCode );
+
+    /* Retrieve our device extensions pointer */
+    WdfWaitLockAcquire( lock, NULL );
+    device_object = WdfCollectionGetItem( collection, 0 );
+    WdfWaitLockRelease( lock );
+
+    device_extension = FilterGetData( device_object );
+
+    switch ( IoControlCode )
+    {
+    case UPDATE_DRIVER_CONFIGURATION:
+        DEBUG_LOG( "IOCTL UPDATE_DRIVER_CONFIGURATION received" );
+
+        /* retrieve the IRP buffer */
+        status = WdfRequestRetrieveInputBuffer(
+            Request,
+            sizeof( DEVICE_CONFIGURATION_OPTIONS ),
+            &buffer,
+            &buffer_size
+        );
+
+        if ( !NT_SUCCESS( status ) )
+        {
+            DEBUG_ERROR( "WdfRequestRetrieveInputBuffer failed with status code 0x%x", status );
+            break;
+        }
+
+        /* update our device extensions configuration */
+        PDEVICE_CONFIGURATION_OPTIONS device_options = ( PDEVICE_CONFIGURATION_OPTIONS )buffer;
+
+        InterlockedExchange( &device_extension->Enabled, device_options->Enabled );
+        InterlockedExchange( &device_extension->AccelMultiplier, device_options->AccelMultiplier );
+        break;
+
+    default:
+        DEBUG_ERROR( "WdfExternalDeviceIoControl received invalid IOCTL code" );
+        status = STATUS_INVALID_DEVICE_REQUEST;
+    }
 
     /* Complete the request */
     WdfRequestCompleteWithInformation(
         Request,
-        STATUS_SUCCESS,
+        status,
         NULL
     );
 }

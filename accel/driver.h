@@ -13,8 +13,22 @@
 #define NUM_TICKS_PER_MS 10000
 #define UNINITIALISED_COORDINATE -1
 
+#define ACCEL_ENABLED 1
+#define ACCEL_DISABLED 0
+
+#define UPDATE_DRIVER_CONFIGURATION CTL_CODE(FILE_DEVICE_MOUSE, 0x8000, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct _DEVICE_CONFIGURATION_OPTIONS
+{
+    INT AccelMultiplier;
+    INT Enabled;
+
+}DEVICE_CONFIGURATION_OPTIONS, *PDEVICE_CONFIGURATION_OPTIONS;
+
 typedef struct _DEVICE_EXTENSION
 {  
+    volatile INT AccelMultiplier;
+    volatile INT Enabled;
     INT64 PreviousTick;
     CONNECT_DATA UpperConnectData;
 
