@@ -15,8 +15,6 @@
 
 typedef struct _DEVICE_EXTENSION
 {  
-    ULONG PreviousX;
-    ULONG PreviousY;
     INT64 PreviousTick;
     CONNECT_DATA UpperConnectData;
 

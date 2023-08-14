@@ -10,6 +10,9 @@
 #pragma warning(disable:4055)
 #pragma warning(disable:4152)
 
+WDFWAITLOCK lock;
+WDFCOLLECTION collection;
+
 /*
 * Standard driver entry routine which will be the first thing to run in our driver.
 * We initialise our WDF configuration and create the WDF framework driver object.
@@ -47,6 +50,21 @@ NTSTATUS DriverEntry(
 }
 
 /*
+* This callback function will be called when either the framework or driver
+* attempts to delete the object.
+*/
+VOID WdfDeviceObjectCleanup(
+    _In_ WDFOBJECT Device
+)
+{
+    PAGED_CODE();
+    /* Safely remove our device from the device collection */
+    WdfWaitLockAcquire( lock, NULL );
+    WdfCollectionRemove( collection, Device );
+    WdfWaitLockRelease( lock );
+}
+
+/*
 * This function is called by the PnP manager and is where we configure 
 * the properties of our device. In our case we set our device to be a 
 * filter driver. We also configure our IO queue properties to use the 
@@ -69,6 +87,7 @@ NTSTATUS WdfDeviceAddCallback(
     NTSTATUS status = STATUS_SUCCESS;
     WDFDEVICE device_handle;
     WDF_IO_QUEUE_CONFIG io_queue_config;
+    PDEVICE_EXTENSION device_extension;
 
     /* Tell the framework we are a filter device rather then a function device */
     WdfFdoInitSetFilter( DeviceInit );
@@ -87,6 +106,47 @@ NTSTATUS WdfDeviceAddCallback(
         DEBUG_ERROR( "WdfDeviceCreate failed with status code 0x%x", status );
         return status;
     }
+
+    /* Create a framework object collection where we can store our device */
+    status = WdfCollectionCreate(
+        WDF_NO_OBJECT_ATTRIBUTES,
+        &collection
+    );
+
+    if ( !NT_SUCCESS( status ) )
+    {
+        DEBUG_ERROR( "WdfCollectionCreate failed with status code 0x%x", status );
+        return status;
+    }
+
+    /* Initialise our collection lock */
+    status = WdfWaitLockCreate(
+        WDF_NO_OBJECT_ATTRIBUTES,
+        &lock
+    );
+
+    if ( !NT_SUCCESS( status ) )
+    {
+        DEBUG_ERROR( "WdfWaitLockCreate failed with status code 0x%x", status );
+        return status;
+    }
+
+    /* Safely add our device into our object collection */
+    WdfWaitLockAcquire( lock, NULL );
+
+    status = WdfCollectionAdd( collection, device_handle );
+
+    if ( !NT_SUCCESS( status ) )
+    {
+        DEBUG_ERROR( "WdfCollectionAdd failed with status code 0x%x", status );
+        WdfWaitLockRelease( lock );
+        return status;
+    }
+
+    WdfWaitLockRelease( lock );
+
+    /* Assign our WdfDeviceObjectCleanup as the devices object cleanup routine */
+    device_attributes.EvtCleanupCallback = WdfDeviceObjectCleanup;
 
     /* Initialize our drivers WDF_IO_QUEUE_CONFIG structure with dispatch type parallel*/
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE( 
@@ -176,35 +236,22 @@ VOID WdfMouseFilterCallback(
     device_extension = FilterGetData( device_handle );
 
     /* 
-    * For some reason my mouse only sends 1 packet at a time despite what ive read online
-    * regarding that there is always more then 1 packet sent up the stack at a time, so
-    * we must try something different to get the speed of the mouse
+    * Despite what is stated in the (probably) outdated WDF documentation, mouse packets
+    * only come in with a maximum count of 1, hence there is no need to iterate through the
+    * packets with an upper limit set as InputDataEnd - InputDataStart since it will always
+    * be equal to 1. This is only based on my testing with a few of my modern mouses, so
+    * results may differ for you.
     */
 
     INT64 current_tick = KeQueryPerformanceCounter( NULL ).QuadPart;
     INT64 tick_delta = ( current_tick - device_extension->PreviousTick ) / 100;
 
-    if ( InputDataStart->Flags & MOUSE_MOVE_RELATIVE )
-    {
-        DEBUG_LOG( "Mouse move relative LOL! X: %ld, Y: %ld", InputDataStart->LastX, InputDataStart->LastY );
-    }
-    else
-    {
-        DEBUG_LOG( "Mouse move abolsute fuck sakes" );
-    }
+    DEBUG_LOG( "Flags: %lx -- X: %lx, Y: %lx", InputDataStart->Flags, InputDataStart->LastX, InputDataStart->LastY);
 
-    /* this is really not ideal.... */
-    //if ( device_extension->PreviousX == UNINITIALISED_COORDINATE && 
-    //    device_extension->PreviousY == UNINITIALISED_COORDINATE )
-    //{
-    //    device_extension->PreviousX = InputDataStart->LastX;
-    //    device_extension->PreviousY = InputDataStart->LastY;
-    //    goto end;
-    //}
-
-
-
-end:
+    /* 
+    * No need to check the flags to ensure its a relative movement since its an expensive 
+    * operation and we can just assume that the packet is a relative packet. (lol)
+    */
 
     device_extension->PreviousTick = current_tick;
 
@@ -236,7 +283,6 @@ VOID WdfInternalDeviceIoControl(
 
     PDEVICE_EXTENSION device_extension;
     PCONNECT_DATA connect_data;
-    PINTERNAL_I8042_HOOK_MOUSE mouse_hook;
     NTSTATUS status = STATUS_SUCCESS;
     WDFDEVICE device_handle;
     size_t length;
@@ -278,10 +324,6 @@ VOID WdfInternalDeviceIoControl(
 
         /* store our connect data in our device extension structure */
         device_extension->UpperConnectData = *connect_data;
-
-        /* Initialise our previous X and Y values */
-        device_extension->PreviousX = UNINITIALISED_COORDINATE;
-        device_extension->PreviousY = UNINITIALISED_COORDINATE;
 
         /* 
         * The CONNECT_DATA structure is used to store information that the Kbdclass and
