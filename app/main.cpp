@@ -8,7 +8,8 @@ int main( void )
 	
 	DEVICE_CONFIGURATION_OPTIONS options;
 	options.AccelMultiplier = 5;
-	options.Enabled = 1;
+	options.Status = 1;
+	options.SensitivityMultiplier = 0;
 	driver.UpdateAccelConfiguration( &options );
 
 	while ( 1 )

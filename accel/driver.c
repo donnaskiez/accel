@@ -230,16 +230,17 @@ VOID WdfMouseFilterCallback(
 {
     PDEVICE_EXTENSION device_extension;
     WDFDEVICE device_handle;
-    INT multiplier = 0;
-    INT enabled = 0;
+    INT accel_multiplier = 0;
+    INT sensitivity_multiplier = 0;
+    INT status = 0;
 
     /* Get our device's handle and device extension structure*/
     device_handle = WdfWdmDeviceGetWdfDeviceHandle( DeviceObject );
     device_extension = FilterGetData( device_handle );
 
-    InterlockedExchange( &enabled, device_extension->Enabled );
+    InterlockedExchange( &status, device_extension->Status );
 
-    if ( enabled == ACCEL_DISABLED )
+    if ( status == ACCEL_DISABLED )
         goto end;
 
     /* 
@@ -258,19 +259,20 @@ VOID WdfMouseFilterCallback(
     * operation and we can just assume that the packet is a relative packet. (lol)
     */
 
-    InterlockedExchange( &multiplier, device_extension->AccelMultiplier );
+    InterlockedExchange( &accel_multiplier, device_extension->AccelMultiplier );
+    InterlockedExchange( &sensitivity_multiplier, device_extension->SensitivityMultiplier );
 
-    if ( InputDataStart->LastX > 2 )
-        InputDataStart->LastX = InputDataStart->LastX * multiplier;
+    if ( sensitivity_multiplier > 0 )
+    {
+        InputDataStart->LastX *= sensitivity_multiplier;
+        InputDataStart->LastY *= sensitivity_multiplier;
+    }
 
-    if ( InputDataStart->LastX < -2 )
-        InputDataStart->LastX = InputDataStart->LastX * multiplier;
+    if ( InputDataStart->LastX > 2 || InputDataStart->LastX < -2 )
+        InputDataStart->LastX *= accel_multiplier;
 
-    if ( InputDataStart->LastY > 2 )
-        InputDataStart->LastY = InputDataStart->LastY * multiplier;
-
-    if ( InputDataStart->LastY < -2 )
-        InputDataStart->LastY = InputDataStart->LastY * multiplier;
+    if ( InputDataStart->LastY > 2 || InputDataStart->LastY < -2)
+        InputDataStart->LastY *= accel_multiplier;
 
     device_extension->PreviousTick = current_tick;
 
@@ -452,8 +454,9 @@ VOID WdfExternalDeviceIoControl(
         /* update our device extensions configuration */
         PDEVICE_CONFIGURATION_OPTIONS device_options = ( PDEVICE_CONFIGURATION_OPTIONS )buffer;
 
-        InterlockedExchange( &device_extension->Enabled, device_options->Enabled );
+        InterlockedExchange( &device_extension->Status, device_options->Status );
         InterlockedExchange( &device_extension->AccelMultiplier, device_options->AccelMultiplier );
+        InterlockedExchange( &device_extension->SensitivityMultiplier, device_options->SensitivityMultiplier );
         break;
 
     default:

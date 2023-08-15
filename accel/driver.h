@@ -21,14 +21,16 @@
 typedef struct _DEVICE_CONFIGURATION_OPTIONS
 {
     INT AccelMultiplier;
-    INT Enabled;
+    INT SensitivityMultiplier;
+    INT Status;
 
 }DEVICE_CONFIGURATION_OPTIONS, *PDEVICE_CONFIGURATION_OPTIONS;
 
 typedef struct _DEVICE_EXTENSION
 {  
     volatile INT AccelMultiplier;
-    volatile INT Enabled;
+    volatile INT SensitivityMultiplier;
+    volatile INT Status;
     INT64 PreviousTick;
     CONNECT_DATA UpperConnectData;
 

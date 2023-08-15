@@ -9,7 +9,8 @@
 struct DEVICE_CONFIGURATION_OPTIONS
 {
 	INT AccelMultiplier;
-	INT Enabled;
+	INT SensitivityMultiplier;
+	INT Status;
 };
 
 class DriverInterface
