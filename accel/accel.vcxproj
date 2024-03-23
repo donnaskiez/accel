@@ -91,6 +91,7 @@
     </DriverSign>
     <ClCompile>
       <TreatWarningAsError>false</TreatWarningAsError>
+      <PreprocessorDefinitions>DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)wdmsec.lib</AdditionalDependencies>
@@ -128,12 +129,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="driver.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <MASM Include="math.asm">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
-    </MASM>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
